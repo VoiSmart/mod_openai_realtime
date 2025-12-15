@@ -1,14 +1,18 @@
-# mod_openai_audio_stream
+# mod_openai_realtime 
 
-![Build](https://github.com/VoiSmart/mod_openai_audio_stream/actions/workflows/build.yml/badge.svg?branch=main)
-![Code-Checks](https://github.com/VoiSmart/mod_openai_audio_stream/actions/workflows/code-checks.yml/badge.svg?branch=main)
+![Build](https://github.com/VoiSmart/mod_openai_realtime/actions/workflows/build.yml/badge.svg?branch=main)
+![Code-Checks](https://github.com/VoiSmart/mod_openai_realtime/actions/workflows/code-checks.yml/badge.svg?branch=main)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat)](LICENSE)
 
-**mod_openai_audio_stream** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI Realtime WebSocket endpoint. The stream follows OpenAI's Realtime API specification and enables real-time audio playback directly in the channel.  
+**mod_openai_realtime** is a FreeSWITCH module that streams L16 audio from a channel to an OpenAI Realtime WebSocket endpoint. The stream follows OpenAI's Realtime API specification and enables real-time audio playback directly in the channel.  
+
+> [!WARNING]
+> This is a standalone fork of `mod_audio_stream`, not affiliated with the original project.
+> Legacy naming (`mod_openai_audio_stream`) is retained for backward compatibility but will be updated in a future major release.
 
 It is a fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream), specifically adapted for streaming audio to OpenAI's Realtime API and playing the responses back to the user via FreeSWITCH and WebSocket.  
 
-The goal of **mod_openai_audio_stream** is to provide a simple, lightweight, yet effective module for streaming audio and receiving responses directly from OpenAI’s Realtime WebSocket into the call through FreeSWITCH. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), a C++ WebSocket library compiled as a static library.  
+The goal of **mod_openai_realtime** is to provide a simple, lightweight, yet effective module for streaming audio and receiving responses directly from OpenAI’s Realtime WebSocket into the call through FreeSWITCH. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), a C++ WebSocket library compiled as a static library.  
 
 
 ## Important Notes 
@@ -76,7 +80,7 @@ The following is **a simple dialplan example** that demonstrates how to use the 
 
 * Make sure to replace `sk-xxxxxxxxxxxxxxxxxx` with your actual OpenAI API key.
 * The dialplan answers the call and starts streaming audio to OpenAI's Realtime API using `uuid_openai_audio_stream`, so you can try it out and see the OpenAI events in the FreeSWITCH console within the `mod_openai_audio_stream::json` events and other module events.
-* The playback action with `silence_stream://-1//` is needed for audio playback to work properly. For more details, check issue [#16](https://github.com/VoiSmart/mod_openai_audio_stream/issues/16).
+* The playback action with `silence_stream://-1//` is needed for audio playback to work properly. For more details, check issue [#16](https://github.com/VoiSmart/mod_openai_realtime/issues/16).
 
 #### Next steps
 
@@ -85,7 +89,7 @@ The **getting started** example is a basic demonstration of how to use the modul
 This way you can build more complex applications **allowing for function calls, updating instructions**, and other interactions with OpenAI's Realtime API. Check out the [OpenAI Realtime documentation](https://platform.openai.com/docs/guides/realtime) and [API reference](https://platform.openai.com/docs/api-reference/realtime) for more details on how to structure your requests and handle responses.
 
 ### Channel variables
-The following channel variables can be used to fine tune websocket connection and also configure mod_openai_audio_stream logging:
+The following channel variables can be used to fine-tune websocket connection and also configure mod_openai_realtime logging:
 
 | Variable                               | Description                                             | Default |
 | -------------------------------------- | ------------------------------------------------------- | ------- |
