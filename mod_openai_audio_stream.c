@@ -170,9 +170,9 @@ static switch_status_t send_json(switch_core_session_t *session, char* json) {
 #define STREAM_API_SYNTAX \
 "USAGE:\n" \
 "--------------------------------------------------------------------------------\n" \
-"uuid_openai_audio_stream <uuid> start <wss-url> <mono | mixed | stereo> \n" \
-"       [8k | 16k | 24k | <other rate>] [mute_user]\n" \
-"       where <rate> = 8k|16k|24k or any multiple of 8000 (default: 8k)\n" \
+"uuid_openai_audio_stream <uuid> start <wss-url> <mono | mixed | stereo>\n" \
+"                        [8k | 16k | 24k | <other rate>] [mute_user]\n" \
+"                        where <rate> = 8k|16k|24k or any multiple of 8000 (default: 8k)\n" \
 "uuid_openai_audio_stream <uuid> [stop | pause | resume]\n" \
 "uuid_openai_audio_stream <uuid> [mute | unmute] [user | openai | all]\n" \
 "uuid_openai_audio_stream <uuid> send_json <base64json>\n" \

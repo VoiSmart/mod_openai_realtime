@@ -35,6 +35,7 @@ struct private_data {
     switch_buffer_t *sbuffer;
     int rtp_packets;
     switch_buffer_t *playback_buffer;
+    void *stream_buffers;
 };
 
 typedef struct private_data private_t;

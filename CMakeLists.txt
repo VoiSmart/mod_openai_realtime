@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 project(mod_openai_audio_stream
         VERSION 1.0.0
         DESCRIPTION "Audio streaming module for FreeSWITCH."
-        HOMEPAGE_URL "https://github.com/VoiSmart/mod_openai_audio_stream") 
+        HOMEPAGE_URL "https://github.com/VoiSmart/mod_openai_realtime") 
 
 include(GNUInstallDirs)
 

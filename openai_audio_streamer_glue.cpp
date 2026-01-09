@@ -15,6 +15,19 @@
 
 #define FRAME_SIZE_8000  320 /* 1000x0.02 (20ms)= 160 x(16bit= 2 bytes) 320 frame size*/
 
+// Persistent buffers for stream_frame to avoid per-frame heap allocations
+struct StreamBuffers {
+    std::vector<uint8_t> flush_buffer;
+    std::vector<spx_int16_t> resample_buffer;
+    std::vector<uint8_t> data_buf;
+
+    StreamBuffers() {
+        flush_buffer.reserve(SWITCH_RECOMMENDED_BUFFER_SIZE);
+        resample_buffer.reserve(SWITCH_RECOMMENDED_BUFFER_SIZE / sizeof(spx_int16_t));
+        data_buf.resize(SWITCH_RECOMMENDED_BUFFER_SIZE);
+    }
+};
+
 class AudioStreamer {
 public:
 
@@ -526,6 +539,7 @@ namespace {
                                             tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling, disable_audiofiles); 
 
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
+            tech_pvt->stream_buffers = static_cast<void *>(new StreamBuffers());
 
             switch_mutex_init(&tech_pvt->mutex, SWITCH_MUTEX_NESTED, pool);
 
@@ -566,6 +580,11 @@ namespace {
             auto* as = static_cast<AudioStreamer*>(tech_pvt->pAudioStreamer);
             delete as;
             tech_pvt->pAudioStreamer = nullptr;
+        }
+        if (tech_pvt->stream_buffers) {
+            auto* sb = static_cast<StreamBuffers*>(tech_pvt->stream_buffers);
+            delete sb;
+            tech_pvt->stream_buffers = nullptr;
         }
     }
 
@@ -936,23 +955,21 @@ extern "C" {
             return SWITCH_TRUE;
         }
 
-        // Pre-allocate reusable buffers to avoid repeated allocations
-        std::vector<uint8_t> flush_buffer;
-        std::vector<spx_int16_t> resample_buffer;
+        // Get persistent buffers (allocated once per session, reused across all frames)
+        auto *bufs = static_cast<StreamBuffers*>(tech_pvt->stream_buffers);
 
         auto flush_sbuffer = [&]() {
             switch_size_t inuse = switch_buffer_inuse(tech_pvt->sbuffer);
             if (inuse > 0) {
-                flush_buffer.resize(inuse);
-                switch_buffer_read(tech_pvt->sbuffer, flush_buffer.data(), inuse);
+                bufs->flush_buffer.resize(inuse);
+                switch_buffer_read(tech_pvt->sbuffer, bufs->flush_buffer.data(), inuse);
                 switch_buffer_zero(tech_pvt->sbuffer);
-                pAudioStreamer->writeAudioDelta(flush_buffer.data(), inuse);
+                pAudioStreamer->writeAudioDelta(bufs->flush_buffer.data(), inuse);
             }
         };
 
-        std::vector<uint8_t> data_buf(SWITCH_RECOMMENDED_BUFFER_SIZE);
         switch_frame_t frame{};
-        frame.data = data_buf.data();
+        frame.data = bufs->data_buf.data();
         frame.buflen = SWITCH_RECOMMENDED_BUFFER_SIZE;
 
         while (switch_core_media_bug_read(bug, &frame, SWITCH_TRUE) == SWITCH_STATUS_SUCCESS) {
@@ -1003,7 +1020,7 @@ extern "C" {
                 }
             }
 
-            resample_buffer.resize(out_len * tech_pvt->channels);
+            bufs->resample_buffer.resize(out_len * tech_pvt->channels);
 
             if (tech_pvt->channels == 1) {
                 speex_resampler_process_int(
@@ -1011,7 +1028,7 @@ extern "C" {
                     0,
                     static_cast<const spx_int16_t *>(frame.data),
                     &in_len,
-                    resample_buffer.data(),
+                    bufs->resample_buffer.data(),
                     &out_len
                 );
             } else {
@@ -1019,7 +1036,7 @@ extern "C" {
                     tech_pvt->resampler,
                     static_cast<const spx_int16_t *>(frame.data),
                     &in_len,
-                    resample_buffer.data(),
+                    bufs->resample_buffer.data(),
                     &out_len
                 );
             }
@@ -1028,7 +1045,7 @@ extern "C" {
             if (bytes_written > 0) {
                 // For 20ms packets, send immediately without buffering
                 if (tech_pvt->rtp_packets == 1) {
-                    pAudioStreamer->writeAudioDelta(reinterpret_cast<uint8_t *>(resample_buffer.data()), bytes_written);
+                    pAudioStreamer->writeAudioDelta(reinterpret_cast<uint8_t *>(bufs->resample_buffer.data()), bytes_written);
                 } else {
                     // Check if buffer has enough space before writing
                     switch_size_t free_space = switch_buffer_freespace(tech_pvt->sbuffer);
@@ -1039,7 +1056,7 @@ extern "C" {
                     if (bytes_written <= free_space) {
                         switch_buffer_write(
                             tech_pvt->sbuffer,
-                            reinterpret_cast<const uint8_t *>(resample_buffer.data()),
+                            reinterpret_cast<const uint8_t *>(bufs->resample_buffer.data()),
                             bytes_written
                         );
                         if (switch_buffer_freespace(tech_pvt->sbuffer) == 0) {
