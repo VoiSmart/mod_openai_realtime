@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 project(mod_openai_audio_stream
         VERSION 1.0.0
         DESCRIPTION "Audio streaming module for FreeSWITCH."
-        HOMEPAGE_URL "https://github.com/VoiSmart/mod_openai_audio_stream") 
+        HOMEPAGE_URL "https://github.com/VoiSmart/mod_openai_realtime") 
 
 include(GNUInstallDirs)
 
@@ -34,7 +34,13 @@ if(CMAKE_BUILD_TYPE MATCHES "Release")
     set_target_properties(ixwebsocket PROPERTIES LINK_FLAGS_RELEASE "-s -w") #-static-libgcc -static-libstdc++
 endif()
 
-add_library(mod_openai_audio_stream SHARED mod_openai_audio_stream.c mod_openai_audio_stream.h openai_audio_streamer_glue.h openai_audio_streamer_glue.cpp buffer/ringbuffer.c base64.cpp)
+add_library(mod_openai_audio_stream SHARED
+    mod_openai_audio_stream.c
+    mod_openai_audio_stream.h
+    openai_audio_streamer_glue.h
+    openai_audio_streamer_glue.cpp
+    base64.cpp
+)
 
 set_property(TARGET mod_openai_audio_stream PROPERTY POSITION_INDEPENDENT_CODE ON)
 
