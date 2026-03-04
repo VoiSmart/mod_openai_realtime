@@ -14,6 +14,7 @@
 #include "base64.h"
 
 #define FRAME_SIZE_8000  320 /* 1000x0.02 (20ms)= 160 x(16bit= 2 bytes) 320 frame size*/
+#define MAX_AUDIO_CHUNK_SAMPLES 16384 /* max samples per queue entry (~32KB), keeps chunks within playback buffer capacity */
 
 // Persistent buffers for stream_frame to avoid per-frame heap allocations
 struct StreamBuffers {
@@ -363,7 +364,19 @@ public:
     
     void push_audio_queue(const std::vector<int16_t>& audio_data) {
         std::lock_guard<std::mutex> lock(m_audio_queue_mutex);
-        m_audio_queue.push(audio_data);
+        const size_t total = audio_data.size();
+        if (total <= MAX_AUDIO_CHUNK_SAMPLES) {
+            m_audio_queue.push(audio_data);
+        } else {
+            size_t num_chunks = (total + MAX_AUDIO_CHUNK_SAMPLES - 1) / MAX_AUDIO_CHUNK_SAMPLES;
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+                "(%s) push_audio_queue: re-chunking %zu samples into %zu chunks (max %d samples each)\n",
+                m_sessionId.c_str(), total, num_chunks, MAX_AUDIO_CHUNK_SAMPLES);
+            for (size_t offset = 0; offset < total; offset += MAX_AUDIO_CHUNK_SAMPLES) {
+                size_t end = std::min(offset + MAX_AUDIO_CHUNK_SAMPLES, total);
+                m_audio_queue.emplace(audio_data.begin() + offset, audio_data.begin() + end);
+            }
+        }
     }
 
     bool pop_audio_queue(std::vector<int16_t> &out_audio) {
