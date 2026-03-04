@@ -150,9 +150,11 @@ public:
             }
         });
 
-        int err = 0;
-        out_sample_rate = session_sampling; 
-        m_resampler = speex_resampler_init(1, in_sample_rate, out_sample_rate, 5, &err);
+        out_sample_rate = session_sampling;
+        if (in_sample_rate != out_sample_rate) {
+            int err = 0;
+            m_resampler = speex_resampler_init(1, in_sample_rate, out_sample_rate, 5, &err);
+        }
 
         // Now that our callback is setup, we can start our background thread and receive messages
         webSocket.start();
@@ -210,8 +212,14 @@ public:
     }
 
     
-    std::vector<int16_t> resampleRawAudio(const std::string& input_raw) {
+    std::vector<int16_t> convertRawAudio(const std::string& input_raw) {
         size_t in_samples = input_raw.size() / 2;
+
+        if (!m_resampler) {
+            std::vector<int16_t> buffer(in_samples);
+            std::memcpy(buffer.data(), input_raw.data(), input_raw.size());
+            return buffer;
+        }
 
         double scaled = static_cast<double>(in_samples) * out_sample_rate / in_sample_rate;
         size_t out_samples = static_cast<size_t>(scaled) + 1;
@@ -345,7 +353,7 @@ public:
                     free(jsonString);
                 }
 
-                auto resampled = resampleRawAudio(rawAudio); 
+                auto resampled = convertRawAudio(rawAudio); 
                 push_audio_queue(resampled);
                 status = SWITCH_TRUE;
 
