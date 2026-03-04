@@ -25,10 +25,21 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Setup git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Format check
+        run: |
+          set -eux
+          ALL_FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp')"
+          FILES="$(echo "$ALL_FILES" | grep -v '^libs/' || true)"
+          if [ -n "$FILES" ]; then
+            clang-format --dry-run --Werror $FILES
+          fi
+
       - name: Configure
         run: |
           set -eux
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
@@ -42,7 +53,8 @@ jobs:
           set -eux
           scan-build --status-bugs cmake --build build -j"$(nproc)"
 
-          FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx' | grep -v '^buffer/' | grep -v '^libs/')"
+          ALL_FILES="$(git ls-files '*.c' '*.cc' '*.cpp' '*.cxx')"
+          FILES="$(echo "$ALL_FILES" | grep -v '^libs/' || true)"
           if [ -n "$FILES" ]; then
             clang-tidy -p build $FILES \
               --warnings-as-errors='clang-analyzer-*,bugprone-*,performance-*'
@@ -53,12 +65,12 @@ jobs:
           cppcheck --enable=warning,performance,portability --std=c++17 --force \
                    --project=build/compile_commands.json \
                    --suppress=missingIncludeSystem \
-                   -i build -i buffer -i libs 2> cppcheck-warn.log
+                   -i build -i libs 2> cppcheck-warn.log
 
           cppcheck --enable=style --std=c++17 --force \
                    --project=build/compile_commands.json \
                    --suppress=missingIncludeSystem \
-                   -i build -i buffer -i libs 2> cppcheck-style.log || true
+                   -i build -i libs 2> cppcheck-style.log || true
 
           if [ -s cppcheck-style.log ]; then
             echo "Style issues found by cppcheck:"

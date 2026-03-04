@@ -67,7 +67,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	ca-certificates \
 	build-essential \
-	clang clang-tidy clang-tools \
+	clang clang-format clang-tidy clang-tools \
 	cppcheck cmake pkg-config ccache \
 	libssl-dev zlib1g-dev \
 	libspeexdsp-dev libspandsp-dev \
