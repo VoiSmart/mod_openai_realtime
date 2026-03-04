@@ -4,6 +4,11 @@
 #include <ixwebsocket/IXWebSocket.h>
 #include <sstream>
 #include <queue>
+#include <algorithm>
+#include <cctype>
+#include <memory>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 #include <switch_json.h>
@@ -242,16 +247,16 @@ class AudioStreamer {
         double scaled = static_cast<double>(in_samples) * out_sample_rate / in_sample_rate;
         size_t out_samples = static_cast<size_t>(scaled) + 1;
 
-        std::vector<int16_t> in_buffer(in_samples);
-        std::vector<int16_t> out_buffer(out_samples);
-
-        std::memcpy(in_buffer.data(), input_raw.data(), usable_bytes);
-
         if (in_samples > UINT32_MAX || out_samples > UINT32_MAX) {
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Too many samples to resample: in=%zu, out=%zu\n",
                               in_samples, out_samples);
             return {};
         }
+
+        std::vector<int16_t> in_buffer(in_samples);
+        std::vector<int16_t> out_buffer(out_samples);
+
+        std::memcpy(in_buffer.data(), input_raw.data(), usable_bytes);
 
         spx_uint32_t in_len = static_cast<spx_uint32_t>(in_samples);
         spx_uint32_t out_len = static_cast<spx_uint32_t>(out_samples);
@@ -374,8 +379,10 @@ class AudioStreamer {
                 }
 
                 auto resampled = convertRawAudio(rawAudio);
-                push_audio_queue(resampled);
-                status = SWITCH_TRUE;
+                if (!resampled.empty()) {
+                    push_audio_queue(resampled);
+                    status = SWITCH_TRUE;
+                }
 
             } else {
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
@@ -400,7 +407,7 @@ class AudioStreamer {
             m_audio_queue.push(audio_data);
         } else {
             size_t num_chunks = (total + MAX_AUDIO_CHUNK_SAMPLES - 1) / MAX_AUDIO_CHUNK_SAMPLES;
-            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO,
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG,
                               "(%s) push_audio_queue: re-chunking %zu samples into %zu chunks (max %d samples each)\n",
                               m_sessionId.c_str(), total, num_chunks, MAX_AUDIO_CHUNK_SAMPLES);
             for (size_t offset = 0; offset < total; offset += MAX_AUDIO_CHUNK_SAMPLES) {
@@ -701,7 +708,11 @@ int validate_ws_uri(const char *url, char *wsUri) {
     }
 
     // Copy valid URI to wsUri
-    std::strncpy(wsUri, url, MAX_WS_URI);
+    if (strlen(url) >= MAX_WS_URI) {
+        return 0;
+    }
+    size_t len = strlen(url);
+    memcpy(wsUri, url, len + 1);
     return 1;
 }
 
@@ -923,13 +934,9 @@ switch_status_t stream_session_init(switch_core_session_t *session, responseHand
     int rtp_packets = 1;
     bool no_reconnect = false;
     const char *tls_cafile = NULL;
-    ;
     const char *tls_keyfile = NULL;
-    ;
     const char *tls_certfile = NULL;
-    ;
     const char *openai_api_key = NULL;
-    ;
     bool tls_disable_hostname_validation = false;
     bool disable_audiofiles = false;
     bool raw_audio_mode = false;
@@ -1233,10 +1240,13 @@ switch_status_t stream_session_cleanup(switch_core_session_t *session, char *tex
         auto *audioStreamer = static_cast<AudioStreamer *>(tech_pvt->pAudioStreamer);
         if (audioStreamer) {
             audioStreamer->deleteFiles();
-            stream_session_send_json(session, text);
+            if (text && *text) {
+                stream_session_send_json(session, text);
+            }
             finish(tech_pvt);
         }
 
+        switch_mutex_unlock(tech_pvt->mutex);
         destroy_tech_pvt(tech_pvt);
 
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
