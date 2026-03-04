@@ -32,6 +32,7 @@ struct private_data {
     int user_audio_muted:1;
     int openai_audio_muted:1;
     int close_requested:1;
+    int raw_audio_mode:1;
     switch_buffer_t *sbuffer;
     int rtp_packets;
     switch_buffer_t *playback_buffer;
