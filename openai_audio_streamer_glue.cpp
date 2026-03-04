@@ -35,8 +35,10 @@ public:
     AudioStreamer(const char* uuid, const char* wsUri, responseHandler_t callback, int deflate, int heart_beat,
                     bool suppressLog, const char* extra_headers, bool no_reconnect,
                     const char* tls_cafile, const char* tls_keyfile, const char* tls_certfile,
-                    bool tls_disable_hostname_validation, uint32_t session_sampling, bool disable_audiofiles): m_sessionId(uuid), m_notify(callback), 
-        m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0), m_disable_audiofiles(disable_audiofiles) {
+                    bool tls_disable_hostname_validation, uint32_t session_sampling, bool disable_audiofiles,
+                    bool raw_audio_mode): m_sessionId(uuid), m_notify(callback),
+        m_suppress_log(suppressLog), m_extra_headers(extra_headers), m_playFile(0), m_disable_audiofiles(disable_audiofiles),
+        m_raw_audio_mode(raw_audio_mode) {
 
         ix::WebSocketHttpHeaders headers;
         ix::SocketTLSOptions tlsOptions;
@@ -95,7 +97,22 @@ public:
         webSocket.setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg){
             if (msg->type == ix::WebSocketMessageType::Message)
             {
-                eventCallback(MESSAGE, msg->str.c_str());
+                if (msg->binary) {
+                    if (m_raw_audio_mode) {
+                        auto converted = convertRawAudio(msg->str);
+                        if (!converted.empty()) {
+                            playback_clear_requested = false;
+                            m_response_audio_done = false;
+                            push_audio_queue(converted);
+                        }
+                    } else {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING,
+                            "(%s) Received binary WebSocket frame (%zu bytes) but raw audio mode is not enabled, ignoring\n",
+                            m_sessionId.c_str(), msg->str.size());
+                    }
+                } else {
+                    eventCallback(MESSAGE, msg->str.c_str());
+                }
 
             } else if (msg->type == ix::WebSocketMessageType::Open)
             {
@@ -213,11 +230,16 @@ public:
 
     
     std::vector<int16_t> convertRawAudio(const std::string& input_raw) {
-        size_t in_samples = input_raw.size() / 2;
+        if (input_raw.size() < 2) {
+            return {};
+        }
+        // PCM16 requires 2-byte aligned input; truncate any trailing odd byte
+        size_t usable_bytes = input_raw.size() & ~static_cast<size_t>(1);
+        size_t in_samples = usable_bytes / 2;
 
         if (!m_resampler) {
             std::vector<int16_t> buffer(in_samples);
-            std::memcpy(buffer.data(), input_raw.data(), input_raw.size());
+            std::memcpy(buffer.data(), input_raw.data(), usable_bytes);
             return buffer;
         }
 
@@ -227,7 +249,7 @@ public:
         std::vector<int16_t> in_buffer(in_samples);
         std::vector<int16_t> out_buffer(out_samples);
 
-        std::memcpy(in_buffer.data(), input_raw.data(), input_raw.size());
+        std::memcpy(in_buffer.data(), input_raw.data(), usable_bytes);
 
         if (in_samples > UINT32_MAX || out_samples > UINT32_MAX) {
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
@@ -444,6 +466,14 @@ public:
         webSocket.sendBinary(ix::IXWebSocketSendData(reinterpret_cast<const char *>(buffer), len));
     }
 
+    void sendAudio(uint8_t* buffer, size_t len) {
+        if (m_raw_audio_mode) {
+            writeBinary(buffer, len);
+        } else {
+            writeAudioDelta(buffer, len);
+        }
+    }
+
     void writeText(const char* text) {  // Openai only accepts json not utf8 plain text
         if(!this->isConnected()) return;
         webSocket.sendUtf8Text(ix::IXWebSocketSendData(text, strlen(text)));
@@ -516,6 +546,7 @@ private:
     bool m_disable_audiofiles = false; // disable saving audio files if true
     bool m_openai_speaking = false;
     bool m_response_audio_done = false;
+    bool m_raw_audio_mode = false;
 };
 
 
@@ -526,7 +557,7 @@ namespace {
                                          int deflate, int heart_beat, bool suppressLog, int rtp_packets, const char* extra_headers,
                                          bool no_reconnect, const char *tls_cafile, const char *tls_keyfile,
                                          const char *tls_certfile, bool tls_disable_hostname_validation, bool disable_audiofiles,
-                                         switch_bool_t start_muted)
+                                         switch_bool_t start_muted, bool raw_audio_mode)
         {
             int err; //speex
 
@@ -545,6 +576,7 @@ namespace {
             tech_pvt->audio_paused = 0;
             tech_pvt->user_audio_muted = start_muted ? 1 : 0;
             tech_pvt->openai_audio_muted = 0;
+            tech_pvt->raw_audio_mode = raw_audio_mode ? 1 : 0;
 
             const size_t buflen = (FRAME_SIZE_8000 * desiredSampling / 8000 * channels * rtp_packets);
             const size_t playback_buflen = 128000; // 128KB may need to be decreased 
@@ -557,7 +589,8 @@ namespace {
 
             auto* as = new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat,
                                             suppressLog, extra_headers, no_reconnect,
-                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling, disable_audiofiles); 
+                                            tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, sampling, disable_audiofiles,
+                                            raw_audio_mode);
 
             tech_pvt->pAudioStreamer = static_cast<void *>(as);
             tech_pvt->stream_buffers = static_cast<void *>(new StreamBuffers());
@@ -823,7 +856,7 @@ extern "C" {
                 size_t sample_rate = tech_pvt->sampling > 0 ? static_cast<size_t>(tech_pvt->sampling) : 24000; // 24 KHz is currently the only supported rate by openai
                 size_t bytes = channels * sample_rate * sizeof(int16_t);
                 std::vector<uint8_t> silence(bytes, 0);
-                streamer->writeAudioDelta(silence.data(), silence.size());
+                streamer->sendAudio(silence.data(), silence.size());
                 switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG,
                                   "Sent %zu bytes of silence after muting user audio\n", silence.size());
             } else {
@@ -886,6 +919,7 @@ extern "C" {
         const char* openai_api_key = NULL;;
         bool tls_disable_hostname_validation = false;
         bool disable_audiofiles = false;
+        bool raw_audio_mode = false;
 
         switch_channel_t *channel = switch_core_session_get_channel(session);
 
@@ -912,6 +946,11 @@ extern "C" {
         if (switch_channel_var_true(channel, "STREAM_DISABLE_AUDIOFILES")) {
             switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Audio files will not be saved.\n");
             disable_audiofiles = true;
+        }
+
+        if (switch_channel_var_true(channel, "STREAM_RAW_AUDIO")) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO, "Raw audio mode enabled, bypassing JSON+base64 encoding.\n");
+            raw_audio_mode = true;
         }
 
         const char* heartBeat = switch_channel_get_variable(channel, "STREAM_HEART_BEAT");
@@ -951,7 +990,7 @@ extern "C" {
             return SWITCH_STATUS_FALSE;
         }
         if (SWITCH_STATUS_SUCCESS != stream_data_init(tech_pvt, session, wsUri, samples_per_second, sampling, channels, responseHandler, deflate, heart_beat,
-                                                        suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, disable_audiofiles, start_muted)) {
+                                                        suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation, disable_audiofiles, start_muted, raw_audio_mode)) {
             destroy_tech_pvt(tech_pvt);
             return SWITCH_STATUS_FALSE;
         }
@@ -985,7 +1024,7 @@ extern "C" {
                 bufs->flush_buffer.resize(inuse);
                 switch_buffer_read(tech_pvt->sbuffer, bufs->flush_buffer.data(), inuse);
                 switch_buffer_zero(tech_pvt->sbuffer);
-                pAudioStreamer->writeAudioDelta(bufs->flush_buffer.data(), inuse);
+                pAudioStreamer->sendAudio(bufs->flush_buffer.data(), inuse);
             }
         };
 
@@ -1001,7 +1040,7 @@ extern "C" {
 
             if (!tech_pvt->resampler) {
                 if (tech_pvt->rtp_packets == 1) {
-                    pAudioStreamer->writeAudioDelta(static_cast<uint8_t *>(frame.data), frame.datalen);
+                    pAudioStreamer->sendAudio(static_cast<uint8_t *>(frame.data), frame.datalen);
                 } else {
                     size_t write_len = frame.datalen;
                     const uint8_t *write_data = static_cast<const uint8_t *>(frame.data);
@@ -1066,7 +1105,7 @@ extern "C" {
             if (bytes_written > 0) {
                 // For 20ms packets, send immediately without buffering
                 if (tech_pvt->rtp_packets == 1) {
-                    pAudioStreamer->writeAudioDelta(reinterpret_cast<uint8_t *>(bufs->resample_buffer.data()), bytes_written);
+                    pAudioStreamer->sendAudio(reinterpret_cast<uint8_t *>(bufs->resample_buffer.data()), bytes_written);
                 } else {
                     // Check if buffer has enough space before writing
                     switch_size_t free_space = switch_buffer_freespace(tech_pvt->sbuffer);
