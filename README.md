@@ -135,21 +135,28 @@ Defaults to `false`, which enforces hostname match with the peer certificate.
 The freeswitch module exposes the following API commands:
 
 ```
-uuid_openai_audio_stream <uuid> start <wss-url> <mix-type> [<sampling-rate>] [mute_user]
+uuid_openai_audio_stream <uuid> start <wss-url> <mix-type> [<send-rate>] [<playback-rate>] [mute_user]
 ```
-Attaches a media bug and starts streaming audio (in L16 format) to the websocket server. FS default is 8k. If sampling-rate is other than 8k it will be resampled. Passing `mute_user` delays forwarding caller audio to the Realtime API until you explicitly unmute.
+Attaches a media bug and starts streaming audio (in L16 format) to the websocket server. FS default send rate is 8k. If send-rate is other than 8k it will be resampled. Passing `mute_user` delays forwarding caller audio to the Realtime API until you explicitly unmute.
 - `uuid` - Freeswitch channel unique id
 - `wss-url` - websocket url `ws://` or `wss://`
-- `mix-type` - choice of 
+- `mix-type` - choice of
   - "mono" - single channel containing caller's audio
   - "mixed" - single channel containing both caller and callee audio
   - "stereo" - two channels with caller audio in one and callee audio in the other.
-- `sampling-rate` - optional, choice of
-  - "8k" = 8000 Hz sample rate will be generated
-  - "16k" = 16000 Hz sample rate will be generated
-  - "24k" = 24000 Hz sample rate will be generated
+- `send-rate` - optional, the sample rate to which caller audio is resampled before sending to the server, choice of
+  - "8k" = 8000 Hz (default)
+  - "16k" = 16000 Hz
+  - "24k" = 24000 Hz
+  - or any multiple of 8000
+- `playback-rate` - optional, the sample rate at which audio arrives from the server. The module resamples from this rate to the channel codec rate for playback. Choice of
+  - "8k" = 8000 Hz
+  - "16k" = 16000 Hz
+  - "24k" = 24000 Hz (default)
+  - or any multiple of 8000
+  - If omitted, defaults to 24000 (OpenAI Realtime API rate). When using raw audio mode with a proxy that sends audio at a different rate, set this to match the proxy's output rate.
 - `mute_user` - optional flag. When present, the module initialises muted and ignores caller audio until an explicit `unmute`.
-- **IMPORTANT NOTE**: The OpenAI Realtime API, when using PCM audio format, expects the audio to be in 24 kHz sample rate. Use the sampling-rate parameter as `24k` (or `24000`) and mono to ensure that the audio is sent in the correct format. From the OpenAI Realtime API documentation: *input audio must be 16-bit PCM at a 24kHz sample rate, single channel (mono), and little-endian byte order.* Support for exchanging audio with OpenAI in other formats may be developed in the future, which would make the `<sampling-rate>` and `<mono<` parameters useful for controlling the output format dynamically.
+- **IMPORTANT NOTE**: The OpenAI Realtime API, when using PCM audio format, expects the audio to be in 24 kHz sample rate. Use the send-rate parameter as `24k` (or `24000`) and mono to ensure that the audio is sent in the correct format. From the OpenAI Realtime API documentation: *input audio must be 16-bit PCM at a 24kHz sample rate, single channel (mono), and little-endian byte order.* When using raw audio mode with a proxy server, the `playback-rate` parameter lets you specify the rate of audio the proxy sends back, avoiding pitch/speed distortion from incorrect resampling.
 
 ```
 uuid_openai_audio_stream <uuid> send_json
