@@ -60,8 +60,20 @@ static switch_bool_t capture_callback(switch_media_bug_t *bug, void *user_data, 
     return SWITCH_TRUE;
 }
 
+static int parse_sampling_rate(const char *str) {
+    if (0 == strcmp(str, "16k")) {
+        return 16000;
+    } else if (0 == strcmp(str, "8k")) {
+        return 8000;
+    } else if (0 == strcmp(str, "24k")) {
+        return 24000;
+    } else {
+        return atoi(str);
+    }
+}
+
 static switch_status_t start_capture(switch_core_session_t *session, switch_media_bug_flag_t flags, char *wsUri,
-                                     int sampling, switch_bool_t start_muted) {
+                                     int sampling, int playback_sampling, switch_bool_t start_muted) {
     switch_channel_t *channel = switch_core_session_get_channel(session);
     switch_media_bug_t *bug;
     switch_status_t status;
@@ -88,7 +100,7 @@ static switch_status_t start_capture(switch_core_session_t *session, switch_medi
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "calling stream_session_init.\n");
     if (SWITCH_STATUS_FALSE == stream_session_init(session, responseHandler,
                                                    read_codec->implementation->actual_samples_per_second, wsUri,
-                                                   sampling, channels, start_muted, &pUserData)) {
+                                                   sampling, playback_sampling, channels, start_muted, &pUserData)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                           "Error initializing mod_openai_audio_stream session.\n");
         return SWITCH_STATUS_FALSE;
@@ -173,8 +185,9 @@ static switch_status_t send_json(switch_core_session_t *session, char *json) {
     "USAGE:\n"                                                                                                         \
     "--------------------------------------------------------------------------------\n"                               \
     "uuid_openai_audio_stream <uuid> start <wss-url> <mono | mixed | stereo>\n"                                        \
-    "                        [8k | 16k | 24k | <other rate>] [mute_user]\n"                                            \
-    "                        where <rate> = 8k|16k|24k or any multiple of 8000 (default: 8k)\n"                        \
+    "                        [send_rate] [playback_rate] [mute_user]\n"                                                \
+    "                        where <rate> = 8k|16k|24k or any multiple of 8000\n"                                      \
+    "                        send_rate default: 8k, playback_rate default: 24k\n"                                      \
     "uuid_openai_audio_stream <uuid> [stop | pause | resume]\n"                                                        \
     "uuid_openai_audio_stream <uuid> [mute | unmute] [user | openai | all]\n"                                          \
     "uuid_openai_audio_stream <uuid> send_json <base64json>\n"                                                         \
@@ -277,7 +290,9 @@ SWITCH_STANDARD_API(stream_function) {
                 }
                 char wsUri[MAX_WS_URI];
                 int sampling = 8000;
+                int playback_sampling = 24000;
                 const char *sampling_str = NULL;
+                const char *playback_sampling_str = NULL;
                 switch_bool_t start_muted = SWITCH_FALSE;
                 switch_media_bug_flag_t flags = SMBF_READ_STREAM;
                 flags |= SMBF_WRITE_REPLACE;
@@ -297,18 +312,17 @@ SWITCH_STANDARD_API(stream_function) {
                         start_muted = SWITCH_TRUE;
                     } else {
                         sampling_str = argv[next_index];
-                        if (0 == strcmp(sampling_str, "16k")) {
-                            sampling = 16000;
-                        } else if (0 == strcmp(sampling_str, "8k")) {
-                            sampling = 8000;
-                        } else if (0 == strcmp(sampling_str, "24k")) {
-                            sampling = 24000;
-                        } else {
-                            sampling = atoi(sampling_str);
-                        }
+                        sampling = parse_sampling_rate(sampling_str);
                         next_index++;
                         if (argc > next_index && !strcasecmp(argv[next_index], "mute_user")) {
                             start_muted = SWITCH_TRUE;
+                        } else if (argc > next_index) {
+                            playback_sampling_str = argv[next_index];
+                            playback_sampling = parse_sampling_rate(playback_sampling_str);
+                            next_index++;
+                            if (argc > next_index && !strcasecmp(argv[next_index], "mute_user")) {
+                                start_muted = SWITCH_TRUE;
+                            }
                         }
                     }
                 }
@@ -319,13 +333,21 @@ SWITCH_STANDARD_API(stream_function) {
                 } else if (sampling % 8000 != 0) {
                     if (sampling_str) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                          "invalid sample rate: %s\n", sampling_str);
+                                          "invalid send sample rate: %s\n", sampling_str);
                     } else {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
-                                          "invalid sample rate: %d\n", sampling);
+                                          "invalid send sample rate: %d\n", sampling);
+                    }
+                } else if (playback_sampling % 8000 != 0) {
+                    if (playback_sampling_str) {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                                          "invalid playback sample rate: %s\n", playback_sampling_str);
+                    } else {
+                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
+                                          "invalid playback sample rate: %d\n", playback_sampling);
                     }
                 } else {
-                    status = start_capture(lsession, flags, wsUri, sampling, start_muted);
+                    status = start_capture(lsession, flags, wsUri, sampling, playback_sampling, start_muted);
                 }
                 break;
             }

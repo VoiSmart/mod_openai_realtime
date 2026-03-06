@@ -9,8 +9,8 @@ switch_status_t stream_session_pauseresume(switch_core_session_t *session, int p
 switch_status_t stream_session_set_user_mute(switch_core_session_t *session, int mute);
 switch_status_t stream_session_set_openai_mute(switch_core_session_t *session, int mute);
 switch_status_t stream_session_init(switch_core_session_t *session, responseHandler_t responseHandler,
-                                    uint32_t samples_per_second, char *wsUri, int sampling, int channels,
-                                    switch_bool_t start_muted, void **ppUserData);
+                                    uint32_t samples_per_second, char *wsUri, int sampling, int playback_sampling,
+                                    int channels, switch_bool_t start_muted, void **ppUserData);
 switch_bool_t stream_frame(switch_media_bug_t *bug);
 switch_bool_t write_frame(switch_core_session_t *session, switch_media_bug_t *bug);
 switch_status_t stream_session_cleanup(switch_core_session_t *session, char *text, int channelIsClosing);

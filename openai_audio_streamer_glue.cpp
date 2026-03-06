@@ -40,9 +40,11 @@ class AudioStreamer {
     AudioStreamer(const char *uuid, const char *wsUri, responseHandler_t callback, int deflate, int heart_beat,
                   bool suppressLog, const char *extra_headers, bool no_reconnect, const char *tls_cafile,
                   const char *tls_keyfile, const char *tls_certfile, bool tls_disable_hostname_validation,
-                  uint32_t session_sampling, bool disable_audiofiles, bool raw_audio_mode)
+                  uint32_t session_sampling, uint32_t playback_sampling, bool disable_audiofiles, bool raw_audio_mode)
         : m_sessionId(uuid), m_notify(callback), m_suppress_log(suppressLog), m_extra_headers(extra_headers),
           m_playFile(0), m_disable_audiofiles(disable_audiofiles), m_raw_audio_mode(raw_audio_mode) {
+
+        in_sample_rate = playback_sampling;
 
         ix::WebSocketHttpHeaders headers;
         ix::SocketTLSOptions tlsOptions;
@@ -551,7 +553,7 @@ class AudioStreamer {
     int m_playFile;
     std::unordered_set<std::string> m_Files;
 
-    int in_sample_rate = 24000;  // OpenAI sample rate
+    int in_sample_rate = 24000;  // playback sample rate (default: OpenAI 24kHz)
     int out_sample_rate = 16000; // output default sample rate
     SpeexResamplerState *m_resampler = nullptr;
     std::queue<std::vector<int16_t>> m_audio_queue;
@@ -566,11 +568,12 @@ class AudioStreamer {
 namespace {
 
 switch_status_t stream_data_init(private_t *tech_pvt, switch_core_session_t *session, char *wsUri, uint32_t sampling,
-                                 int desiredSampling, int channels, responseHandler_t responseHandler, int deflate,
-                                 int heart_beat, bool suppressLog, int rtp_packets, const char *extra_headers,
-                                 bool no_reconnect, const char *tls_cafile, const char *tls_keyfile,
-                                 const char *tls_certfile, bool tls_disable_hostname_validation,
-                                 bool disable_audiofiles, switch_bool_t start_muted, bool raw_audio_mode) {
+                                 int desiredSampling, int playback_sampling, int channels,
+                                 responseHandler_t responseHandler, int deflate, int heart_beat, bool suppressLog,
+                                 int rtp_packets, const char *extra_headers, bool no_reconnect, const char *tls_cafile,
+                                 const char *tls_keyfile, const char *tls_certfile,
+                                 bool tls_disable_hostname_validation, bool disable_audiofiles,
+                                 switch_bool_t start_muted, bool raw_audio_mode) {
     int err; // speex
 
     switch_memory_pool_t *pool = switch_core_session_get_pool(session);
@@ -599,9 +602,10 @@ switch_status_t stream_data_init(private_t *tech_pvt, switch_core_session_t *ses
         return SWITCH_STATUS_FALSE;
     }
 
-    auto *as = new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat, suppressLog,
-                                 extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile,
-                                 tls_disable_hostname_validation, sampling, disable_audiofiles, raw_audio_mode);
+    auto *as =
+        new AudioStreamer(tech_pvt->sessionId, wsUri, responseHandler, deflate, heart_beat, suppressLog, extra_headers,
+                          no_reconnect, tls_cafile, tls_keyfile, tls_certfile, tls_disable_hostname_validation,
+                          sampling, playback_sampling, disable_audiofiles, raw_audio_mode);
 
     tech_pvt->pAudioStreamer = static_cast<void *>(as);
     tech_pvt->stream_buffers = static_cast<void *>(new StreamBuffers());
@@ -925,8 +929,8 @@ switch_status_t stream_session_set_openai_mute(switch_core_session_t *session, i
 }
 
 switch_status_t stream_session_init(switch_core_session_t *session, responseHandler_t responseHandler,
-                                    uint32_t samples_per_second, char *wsUri, int sampling, int channels,
-                                    switch_bool_t start_muted, void **ppUserData) {
+                                    uint32_t samples_per_second, char *wsUri, int sampling, int playback_sampling,
+                                    int channels, switch_bool_t start_muted, void **ppUserData) {
     int deflate = 0, heart_beat = 0;
     bool suppressLog = false;
     const char *buffer_size;
@@ -1011,11 +1015,11 @@ switch_status_t stream_session_init(switch_core_session_t *session, responseHand
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "error allocating memory!\n");
         return SWITCH_STATUS_FALSE;
     }
-    if (SWITCH_STATUS_SUCCESS != stream_data_init(tech_pvt, session, wsUri, samples_per_second, sampling, channels,
-                                                  responseHandler, deflate, heart_beat, suppressLog, rtp_packets,
-                                                  extra_headers, no_reconnect, tls_cafile, tls_keyfile, tls_certfile,
-                                                  tls_disable_hostname_validation, disable_audiofiles, start_muted,
-                                                  raw_audio_mode)) {
+    if (SWITCH_STATUS_SUCCESS != stream_data_init(tech_pvt, session, wsUri, samples_per_second, sampling,
+                                                  playback_sampling, channels, responseHandler, deflate, heart_beat,
+                                                  suppressLog, rtp_packets, extra_headers, no_reconnect, tls_cafile,
+                                                  tls_keyfile, tls_certfile, tls_disable_hostname_validation,
+                                                  disable_audiofiles, start_muted, raw_audio_mode)) {
         destroy_tech_pvt(tech_pvt);
         return SWITCH_STATUS_FALSE;
     }
