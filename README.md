@@ -129,6 +129,51 @@ Can be `NONE` which result in no peer verification.
   - `STREAM_TLS_DISABLE_HOSTNAME_VALIDATION` if `true`, disables the check of the hostname against the peer server certificate.
 Defaults to `false`, which enforces hostname match with the peer certificate.
 
+## Raw Audio Mode
+
+With raw audio mode enabled, the module acts as a bidirectional PCM16 audio bridge over WebSocket. This is intended for proxy servers and other backends that exchange raw PCM16 over WebSocket and want to avoid the JSON+base64 overhead used by the standard OpenAI path.
+
+When `STREAM_RAW_AUDIO=true`, the module bypasses JSON+base64 encoding and decoding only for audio payloads and uses raw PCM16 binary WebSocket frames instead.
+
+### How It Works
+
+- **Send direction (User -> Server):** caller audio is sent as binary WebSocket frames containing raw PCM16 little-endian samples, instead of JSON `input_audio_buffer.append` messages with base64-encoded audio.
+- **Receive direction (Server -> User):** binary WebSocket frames are treated as raw PCM16 audio and fed directly into the playback pipeline, with resampling applied if needed. Text WebSocket frames are still processed normally through the standard JSON message handler.
+
+### Control Events
+
+Because text frames continue to be processed through the normal `processMessage()` path even in raw audio mode, the proxy server can and should still send JSON text frames for control events.
+
+| Feature | Required text event from proxy | Effect |
+| --- | --- | --- |
+| Barge-in (user interrupts playback) | `{"type":"input_audio_buffer.speech_started"}` | Clears audio queue and playback buffer |
+| User speech stopped | `{"type":"input_audio_buffer.speech_stopped"}` | Logged; playback remains cleared until new audio arrives |
+| Audio response complete | `{"type":"response.output_audio.done"}` | Sets response done flag and allows `openai_speech_stop` to fire after playback drains |
+| Error reporting | Any JSON with `"type"` containing `"error"` | Logged as error |
+
+Without these text events, the related features will not work correctly. In particular, without `response.output_audio.done`, the `mod_openai_audio_stream::openai_speech_stop` event will not fire after playback completes.
+
+All other JSON text events, such as `session.updated` or `response.done`, continue to be forwarded as `mod_openai_audio_stream::json` events.
+
+### Dialplan Example
+
+```xml
+<action application="answer" />
+<action application="set" data="STREAM_RAW_AUDIO=true"/>
+<action application="set" data="STREAM_DISABLE_AUDIOFILES=true"/>
+<action application="set" data="api_result=${uuid_openai_audio_stream ${uuid} start ws://proxy-server:8080 mono 24k 16k}" />
+<action application="playback" data="silence_stream://-1//"/>
+```
+
+### Proxy Requirements
+
+A proxy server using raw audio mode must:
+
+1. Accept binary WebSocket frames from the module containing raw PCM16 caller audio.
+2. Send audio back as binary WebSocket frames containing raw PCM16.
+3. Send control events as JSON text WebSocket frames.
+4. Use PCM16 mono and a sample rate matching the configured `playback-rate`.
+
 ## API
 
 ### Commands
@@ -157,6 +202,7 @@ Attaches a media bug and starts streaming audio (in L16 format) to the websocket
   - If omitted, defaults to 24000 (OpenAI Realtime API rate). When using raw audio mode with a proxy that sends audio at a different rate, set this to match the proxy's output rate.
 - `mute_user` - optional flag. When present, the module initialises muted and ignores caller audio until an explicit `unmute`.
 - **IMPORTANT NOTE**: The OpenAI Realtime API, when using PCM audio format, expects the audio to be in 24 kHz sample rate. The module now defaults `send-rate` to `24k` for this reason, and mono remains the recommended mode for OpenAI Realtime. You can still override `send-rate` explicitly if you are targeting a different backend. From the OpenAI Realtime API documentation: *input audio must be 16-bit PCM at a 24kHz sample rate, single channel (mono), and little-endian byte order.* When using raw audio mode with a proxy server, the `playback-rate` parameter lets you specify the rate of audio the proxy sends back, avoiding pitch/speed distortion from incorrect resampling.
+- **RAW AUDIO MODE NOTE**: See the [Raw Audio Mode](#raw-audio-mode) section below for the expected proxy contract, including required JSON control events such as `response.output_audio.done`.
 
 ```
 uuid_openai_audio_stream <uuid> send_json
@@ -254,6 +300,7 @@ There is an error with the connection. Multiple fields will be available on the 
 The audio playback is handled by the module.
 OpenAI typically returns JSON objects containing base64 encoded audio to be played to the user. When `STREAM_RAW_AUDIO` is enabled with a compatible proxy, playback audio can also arrive as binary PCM frames.
 The audio delta response may include other fields, but not so important for the audio playback.
+In raw audio mode, binary PCM frames only carry audio data. Control and lifecycle expectations are described in the [Raw Audio Mode](#raw-audio-mode) section.
 ```json
 {
   ...
@@ -265,7 +312,7 @@ The audio delta response may include other fields, but not so important for the 
 
 Event generated by the module (subclass: _mod_openai_audio_stream::play_) will be the same as the `data` element with the **file** added to it representing filePath:
 
-This module will still generate audio files in the temp as `mod_audio_stream` does, every file will be formatted to fit the wav format at openai realtime API sampling rate in raw L16. Use L16 format in your `session.update` to have the audio playback and temporal audio files creation to work properly.
+This module will still generate audio files in the temp as `mod_audio_stream` does. Each file is written as a WAV container carrying the raw L16 audio received for playback, using the configured playback sample rate in the WAV header. Use L16 format in your `session.update` to have the audio playback and temporal audio files creation to work properly.
 Can be useful for debugging purposes or other use cases. The `STREAM_DISABLE_AUDIOFILES` channel variable can be set to `true|1` to disable audio files events and generation.
 ```json
 {

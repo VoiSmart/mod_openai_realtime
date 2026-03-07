@@ -104,6 +104,9 @@ class AudioStreamer {
             if (msg->type == ix::WebSocketMessageType::Message) {
                 if (msg->binary) {
                     if (m_raw_audio_mode) {
+                        if (!m_disable_audiofiles) {
+                            saveDebugAudioFile(msg->str, true);
+                        }
                         auto converted = convertRawAudio(msg->str);
                         if (!converted.empty()) {
                             playback_clear_requested = false;
@@ -313,6 +316,35 @@ class AudioStreamer {
         return wavStream.str();
     }
 
+    std::string saveDebugAudioFile(const std::string& rawAudio, bool notifyPlaybackEvent = false) {
+        char filePath[256];
+        std::string fileType = ".wav";
+        switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir, SWITCH_PATH_SEPARATOR,
+                        m_sessionId.c_str(), m_playFile++, fileType.c_str());
+
+        std::ofstream fstream(filePath, std::ofstream::binary);
+        std::string wavData = createWavFromRaw(rawAudio);
+        fstream.write(wavData.data(), wavData.size());
+        fstream.flush();
+        fstream.close();
+        m_Files.insert(filePath);
+
+        switch_core_session_t *psession = switch_core_session_locate(m_sessionId.c_str());
+        if (notifyPlaybackEvent && psession) {
+            cJSON *payload = cJSON_CreateObject();
+            cJSON_AddStringToObject(payload, "file", filePath);
+            char *jsonString = cJSON_PrintUnformatted(payload);
+            m_notify(psession, EVENT_PLAY, jsonString);
+            cJSON_Delete(payload);
+            free(jsonString);
+        }
+        if (psession) {
+            switch_core_session_rwunlock(psession);
+        }
+
+        return filePath;
+    }
+
     switch_bool_t processMessage(switch_core_session_t *session, std::string& message) {
         cJSON *json = cJSON_Parse(message.c_str());
         switch_bool_t status = SWITCH_FALSE;
@@ -360,18 +392,8 @@ class AudioStreamer {
                 }
 
                 if (!m_disable_audiofiles) {
-                    char filePath[256];
-                    std::string fileType = ".wav";
-                    switch_snprintf(filePath, 256, "%s%s%s_%d.tmp%s", SWITCH_GLOBAL_dirs.temp_dir,
-                                    SWITCH_PATH_SEPARATOR, m_sessionId.c_str(), m_playFile++, fileType.c_str());
-                    std::ofstream fstream(filePath, std::ofstream::binary); // For debugging purposes; can be disabled
-                                                                            // via the disable_audiofiles flag
-                    std::string wavData = createWavFromRaw(rawAudio);
-                    fstream.write(wavData.data(), wavData.size());
-                    fstream.flush(); // flush buffer to os level write
-                    fstream.close();
-                    m_Files.insert(filePath);
-                    cJSON *jsonFile = cJSON_CreateString(filePath);
+                    std::string filePath = saveDebugAudioFile(rawAudio);
+                    cJSON *jsonFile = cJSON_CreateString(filePath.c_str());
                     cJSON_AddItemToObject(json, "file", jsonFile);
 
                     char *jsonString = cJSON_PrintUnformatted(json);
