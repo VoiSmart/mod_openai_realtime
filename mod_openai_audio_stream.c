@@ -187,7 +187,7 @@ static switch_status_t send_json(switch_core_session_t *session, char *json) {
     "uuid_openai_audio_stream <uuid> start <wss-url> <mono | mixed | stereo>\n"                                        \
     "                        [send_rate] [playback_rate] [mute_user]\n"                                                \
     "                        where <rate> = 8k|16k|24k or any multiple of 8000\n"                                      \
-    "                        send_rate default: 8k, playback_rate default: 24k\n"                                      \
+    "                        send_rate default: 24k, playback_rate default: 24k\n"                                      \
     "uuid_openai_audio_stream <uuid> [stop | pause | resume]\n"                                                        \
     "uuid_openai_audio_stream <uuid> [mute | unmute] [user | openai | all]\n"                                          \
     "uuid_openai_audio_stream <uuid> send_json <base64json>\n"                                                         \
@@ -289,7 +289,7 @@ SWITCH_STANDARD_API(stream_function) {
                     goto release_session;
                 }
                 char wsUri[MAX_WS_URI];
-                int sampling = 8000;
+                int sampling = 24000;
                 int playback_sampling = 24000;
                 const char *sampling_str = NULL;
                 const char *playback_sampling_str = NULL;
@@ -330,7 +330,7 @@ SWITCH_STANDARD_API(stream_function) {
                 if (!validate_ws_uri(argv[2], &wsUri[0])) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                       "invalid websocket uri: %s\n", argv[2]);
-                } else if (sampling % 8000 != 0) {
+                } else if (sampling <= 0 || sampling % 8000 != 0) {
                     if (sampling_str) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                           "invalid send sample rate: %s\n", sampling_str);
@@ -338,7 +338,7 @@ SWITCH_STANDARD_API(stream_function) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                           "invalid send sample rate: %d\n", sampling);
                     }
-                } else if (playback_sampling % 8000 != 0) {
+                } else if (playback_sampling <= 0 || playback_sampling % 8000 != 0) {
                     if (playback_sampling_str) {
                         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                                           "invalid playback sample rate: %s\n", playback_sampling_str);
