@@ -14,6 +14,8 @@ It is a fork of [mod_audio_stream](https://github.com/amigniter/mod_audio_stream
 
 The goal of **mod_openai_realtime** is to provide a simple, lightweight, yet effective module for streaming audio and receiving responses directly from OpenAI’s Realtime WebSocket into the call through FreeSWITCH. It uses [ixwebsocket](https://machinezone.github.io/IXWebSocket/), a C++ WebSocket library compiled as a static library.  
 
+But not only that: the module can also be used as a generic WebSocket audio bridge for simple raw audio playback, bidirectional PCM16 streaming, and integrations with custom proxy servers or other backends.  
+
 
 ## Important Notes 
 
@@ -142,9 +144,9 @@ When `STREAM_RAW_AUDIO=true`, the module bypasses JSON+base64 encoding and decod
 
 ### Control Events
 
-Because text frames continue to be processed through the normal `processMessage()` path even in raw audio mode, the proxy server can and should still send JSON text frames for control events.
+Because text frames continue to be processed through the normal `processMessage()` path even in raw audio mode, the proxy server or other backend can and should still send JSON text frames for control events.
 
-| Feature | Required text event from proxy | Effect |
+| Feature | Required text event from proxy server or other backend | Effect |
 | --- | --- | --- |
 | Barge-in (user interrupts playback) | `{"type":"input_audio_buffer.speech_started"}` | Clears audio queue and playback buffer |
 | User speech stopped | `{"type":"input_audio_buffer.speech_stopped"}` | Logged; playback remains cleared until new audio arrives |
@@ -167,7 +169,7 @@ All other JSON text events, such as `session.updated` or `response.done`, contin
 
 ### Proxy Requirements
 
-A proxy server using raw audio mode must:
+A proxy server or other backend using raw audio mode must:
 
 1. Accept binary WebSocket frames from the module containing raw PCM16 caller audio.
 2. Send audio back as binary WebSocket frames containing raw PCM16.
@@ -199,9 +201,9 @@ Attaches a media bug and starts streaming audio (in L16 format) to the websocket
   - "16k" = 16000 Hz
   - "24k" = 24000 Hz (default)
   - or any multiple of 8000
-  - If omitted, defaults to 24000 (OpenAI Realtime API rate). When using raw audio mode with a proxy that sends audio at a different rate, set this to match the proxy's output rate.
+  - If omitted, defaults to 24000 (OpenAI Realtime API rate). When using raw audio mode with a proxy server or other backend that sends audio at a different rate, set this to match the source audio rate.
 - `mute_user` - optional flag. When present, the module initialises muted and ignores caller audio until an explicit `unmute`.
-- **IMPORTANT NOTE**: The OpenAI Realtime API, when using PCM audio format, expects the audio to be in 24 kHz sample rate. The module now defaults `send-rate` to `24k` for this reason, and mono remains the recommended mode for OpenAI Realtime. You can still override `send-rate` explicitly if you are targeting a different backend. From the OpenAI Realtime API documentation: *input audio must be 16-bit PCM at a 24kHz sample rate, single channel (mono), and little-endian byte order.* When using raw audio mode with a proxy server, the `playback-rate` parameter lets you specify the rate of audio the proxy sends back, avoiding pitch/speed distortion from incorrect resampling.
+- **IMPORTANT NOTE**: The OpenAI Realtime API, when using PCM audio format, expects the audio to be in 24 kHz sample rate. The module now defaults `send-rate` to `24k` for this reason, and mono remains the recommended mode for OpenAI Realtime. You can still override `send-rate` explicitly if you are targeting a different backend. From the OpenAI Realtime API documentation: *input audio must be 16-bit PCM at a 24kHz sample rate, single channel (mono), and little-endian byte order.* When using raw audio mode with a proxy server or other backend, the `playback-rate` parameter lets you specify the rate of audio sent back for playback, avoiding pitch/speed distortion from incorrect resampling.
 - **RAW AUDIO MODE NOTE**: See the [Raw Audio Mode](#raw-audio-mode) section below for the expected proxy contract, including required JSON control events such as `response.output_audio.done`.
 
 ```
@@ -243,6 +245,15 @@ Module will generate the following event types:
 - `mod_openai_audio_stream::disconnect`
 - `mod_openai_audio_stream::error`
 - `mod_openai_audio_stream::play`
+- `mod_openai_audio_stream::openai_speech_start`
+- `mod_openai_audio_stream::openai_speech_stop`
+
+In raw audio mode, control messages from the proxy server or other backend, such as `input_audio_buffer.speech_started` and `input_audio_buffer.speech_stopped`, are still received as JSON text frames and handled through the normal message-processing path. They are not emitted as dedicated FreeSWITCH events by the module. Instead:
+
+- `input_audio_buffer.speech_started` is used internally for barge-in, clearing queued playback audio. This typically corresponds to VAD being triggered by the server or proxy.
+- `input_audio_buffer.speech_stopped` is logged and forwarded through the normal JSON event flow.
+- `mod_openai_audio_stream::openai_speech_start` is emitted by the module when playback actually starts.
+- `mod_openai_audio_stream::openai_speech_stop` is emitted by the module when playback has fully drained after `response.output_audio.done`.
 
 ### response
 Message received from websocket endpoint. Json expected, but it contains whatever the websocket server's response is.
@@ -298,7 +309,7 @@ There is an error with the connection. Multiple fields will be available on the 
 
 ### play
 The audio playback is handled by the module.
-OpenAI typically returns JSON objects containing base64 encoded audio to be played to the user. When `STREAM_RAW_AUDIO` is enabled with a compatible proxy, playback audio can also arrive as binary PCM frames.
+OpenAI typically returns JSON objects containing base64 encoded audio to be played to the user. When `STREAM_RAW_AUDIO` is enabled with a compatible proxy server or other backend, playback audio can also arrive as binary PCM frames.
 The audio delta response may include other fields, but not so important for the audio playback.
 In raw audio mode, binary PCM frames only carry audio data. Control and lifecycle expectations are described in the [Raw Audio Mode](#raw-audio-mode) section.
 ```json
