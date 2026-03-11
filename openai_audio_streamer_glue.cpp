@@ -1190,6 +1190,10 @@ switch_bool_t write_frame(switch_core_session_t *session, switch_media_bug_t *bu
         return SWITCH_TRUE;
     }
 
+    if (frame->samples == 0 || frame->datalen == 0) {
+        return SWITCH_TRUE;
+    }
+
     uint32_t bytes_needed = frame->datalen;
     uint32_t bytes_per_sample = frame->datalen / frame->samples;
 
