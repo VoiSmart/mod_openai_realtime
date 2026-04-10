@@ -73,7 +73,8 @@ static int parse_sampling_rate(const char *str) {
 }
 
 static switch_status_t start_capture(switch_core_session_t *session, switch_media_bug_flag_t flags, char *wsUri,
-                                     int sampling, int playback_sampling, switch_bool_t start_muted) {
+                                     int sampling, int playback_sampling, switch_bool_t start_muted,
+                                     switch_bool_t force_raw_audio_mode) {
     switch_channel_t *channel = switch_core_session_get_channel(session);
     switch_media_bug_t *bug;
     switch_status_t status;
@@ -98,9 +99,9 @@ static switch_status_t start_capture(switch_core_session_t *session, switch_medi
     read_codec = switch_core_session_get_read_codec(session);
 
     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "calling stream_session_init.\n");
-    if (SWITCH_STATUS_FALSE == stream_session_init(session, responseHandler,
-                                                   read_codec->implementation->actual_samples_per_second, wsUri,
-                                                   sampling, playback_sampling, channels, start_muted, &pUserData)) {
+    if (SWITCH_STATUS_FALSE ==
+        stream_session_init(session, responseHandler, read_codec->implementation->actual_samples_per_second, wsUri,
+                            sampling, playback_sampling, channels, start_muted, force_raw_audio_mode, &pUserData)) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR,
                           "Error initializing mod_openai_audio_stream session.\n");
         return SWITCH_STATUS_FALSE;
@@ -181,17 +182,25 @@ static switch_status_t send_json(switch_core_session_t *session, char *json) {
     return status;
 }
 
-#define STREAM_API_SYNTAX                                                                                              \
+#define STREAM_API_SYNTAX_BODY(api_name)                                                                               \
     "USAGE:\n"                                                                                                         \
-    "--------------------------------------------------------------------------------\n"                               \
-    "uuid_openai_audio_stream <uuid> start <wss-url> <mono | mixed | stereo>\n"                                        \
-    "                        [send_rate] [playback_rate] [mute_user]\n"                                                \
-    "                        where <rate> = 8k|16k|24k or any multiple of 8000\n"                                      \
-    "                        send_rate default: 24k, playback_rate default: 24k\n"                                     \
-    "uuid_openai_audio_stream <uuid> [stop | pause | resume]\n"                                                        \
-    "uuid_openai_audio_stream <uuid> [mute | unmute] [user | openai | all]\n"                                          \
-    "uuid_openai_audio_stream <uuid> send_json <base64json>\n"                                                         \
+    "--------------------------------------------------------------------------------\n" api_name                      \
+    " <uuid> start <ws-uri> <mono | mixed | stereo>\n"                                                                 \
+    "         [send_rate] [playback_rate] [mute_user]\n"                                                               \
+    "         where <rate> = 8k|16k|24k or any multiple of 8000\n"                                                     \
+    "         send_rate default: 24k, playback_rate default: 24k\n" api_name                                           \
+    " <uuid> [stop | pause | resume]\n" api_name " <uuid> [mute | unmute] [user | openai | all]\n" api_name            \
+    " <uuid> send_json <base64json>\n"                                                                                 \
     "--------------------------------------------------------------------------------\n"
+
+#define STREAM_API_SYNTAX STREAM_API_SYNTAX_BODY("uuid_openai_audio_stream")
+#define RAW_STREAM_API_SYNTAX STREAM_API_SYNTAX_BODY("uuid_raw_audio_stream")
+
+typedef struct {
+    const char *api_name;
+    const char *syntax;
+    switch_bool_t force_raw_audio_mode;
+} stream_api_config_t;
 
 typedef enum {
     STREAM_CMD_UNKNOWN,
@@ -232,7 +241,8 @@ static stream_command_t stream_command_from_string(const char *name) {
     return STREAM_CMD_UNKNOWN;
 }
 
-SWITCH_STANDARD_API(stream_function) {
+static switch_status_t stream_api_execute(switch_stream_handle_t *stream, switch_core_session_t *session,
+                                          const char *cmd, const stream_api_config_t *api_config) {
     char *mycmd = NULL, *argv[8] = {0};
     int argc = 0;
 
@@ -245,15 +255,15 @@ SWITCH_STANDARD_API(stream_function) {
 
     if (zstr(cmd) || argc < 2) {
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error with command %s.\n", cmd);
-        stream->write_function(stream, "%s\n", STREAM_API_SYNTAX);
+        stream->write_function(stream, "%s\n", api_config->syntax);
         goto done;
     }
 
     stream_command_t command = stream_command_from_string(argv[1]);
 
     if (command != STREAM_CMD_SEND_JSON) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "mod_openai_audio_stream cmd: %s\n",
-                          cmd ? cmd : "");
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "mod_openai_audio_stream %s cmd: %s\n",
+                          api_config->api_name, cmd ? cmd : "");
     }
 
     switch_core_session_t *lsession = NULL;
@@ -285,7 +295,7 @@ SWITCH_STANDARD_API(stream_function) {
                 if (argc < 4) {
                     switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Error with command %s.\n",
                                       cmd);
-                    stream->write_function(stream, "%s\n", STREAM_API_SYNTAX);
+                    stream->write_function(stream, "%s\n", api_config->syntax);
                     goto release_session;
                 }
                 char wsUri[MAX_WS_URI];
@@ -347,7 +357,8 @@ SWITCH_STANDARD_API(stream_function) {
                                           "invalid playback sample rate: %d\n", playback_sampling);
                     }
                 } else {
-                    status = start_capture(lsession, flags, wsUri, sampling, playback_sampling, start_muted);
+                    status = start_capture(lsession, flags, wsUri, sampling, playback_sampling, start_muted,
+                                           api_config->force_raw_audio_mode);
                 }
                 break;
             }
@@ -382,6 +393,17 @@ done:
     return SWITCH_STATUS_SUCCESS;
 }
 
+static const stream_api_config_t STREAM_API_CONFIG = {"uuid_openai_audio_stream", STREAM_API_SYNTAX, SWITCH_FALSE};
+static const stream_api_config_t RAW_STREAM_API_CONFIG = {"uuid_raw_audio_stream", RAW_STREAM_API_SYNTAX, SWITCH_TRUE};
+
+SWITCH_STANDARD_API(stream_function) {
+    return stream_api_execute(stream, session, cmd, &STREAM_API_CONFIG);
+}
+
+SWITCH_STANDARD_API(raw_stream_function) {
+    return stream_api_execute(stream, session, cmd, &RAW_STREAM_API_CONFIG);
+}
+
 SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load) {
     switch_api_interface_t *api_interface;
 
@@ -402,13 +424,22 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load) {
         return SWITCH_STATUS_TERM;
     }
     SWITCH_ADD_API(api_interface, "uuid_openai_audio_stream", "audio_stream API", stream_function, STREAM_API_SYNTAX);
-    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid start wss-url");
+    SWITCH_ADD_API(api_interface, "uuid_raw_audio_stream", "raw audio_stream API", raw_stream_function,
+                   RAW_STREAM_API_SYNTAX);
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid start ws-uri");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid stop");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid pause");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid resume");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid mute");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid unmute");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid send_json");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid start ws-uri");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid stop");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid pause");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid resume");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid mute");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid unmute");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid send_json");
 
     switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "mod_openai_audio_stream API successfully loaded\n");
 

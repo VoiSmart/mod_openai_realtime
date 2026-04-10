@@ -952,7 +952,8 @@ switch_status_t stream_session_set_openai_mute(switch_core_session_t *session, i
 
 switch_status_t stream_session_init(switch_core_session_t *session, responseHandler_t responseHandler,
                                     uint32_t samples_per_second, char *wsUri, int sampling, int playback_sampling,
-                                    int channels, switch_bool_t start_muted, void **ppUserData) {
+                                    int channels, switch_bool_t start_muted, switch_bool_t force_raw_audio_mode,
+                                    void **ppUserData) {
     int deflate = 0, heart_beat = 0;
     bool suppressLog = false;
     const char *buffer_size;
@@ -965,7 +966,7 @@ switch_status_t stream_session_init(switch_core_session_t *session, responseHand
     const char *openai_api_key = NULL;
     bool tls_disable_hostname_validation = false;
     bool disable_audiofiles = false;
-    bool raw_audio_mode = false;
+    bool raw_audio_mode = force_raw_audio_mode ? true : false;
 
     switch_channel_t *channel = switch_core_session_get_channel(session);
 
@@ -995,9 +996,22 @@ switch_status_t stream_session_init(switch_core_session_t *session, responseHand
     }
 
     if (switch_channel_var_true(channel, "STREAM_RAW_AUDIO")) {
-        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
-                          "Raw audio mode enabled, bypassing JSON+base64 encoding.\n");
         raw_audio_mode = true;
+        if (force_raw_audio_mode) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING,
+                              "STREAM_RAW_AUDIO is deprecated and unnecessary when using uuid_raw_audio_stream. "
+                              "Remove the channel variable; raw audio mode is already enabled by the API.\n");
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING,
+                              "STREAM_RAW_AUDIO is deprecated and will be removed in the next major release. "
+                              "Use uuid_raw_audio_stream <uuid> start ... to enable raw audio mode.\n");
+        }
+    }
+
+    if (raw_audio_mode) {
+        const char *raw_audio_source = force_raw_audio_mode ? "API" : "deprecated channel variable";
+        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
+                          "Raw audio mode enabled via %s, bypassing JSON+base64 encoding.\n", raw_audio_source);
     }
 
     const char *heartBeat = switch_channel_get_variable(channel, "STREAM_HEART_BEAT");
