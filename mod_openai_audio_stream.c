@@ -185,7 +185,7 @@ static switch_status_t send_json(switch_core_session_t *session, char *json) {
 #define STREAM_API_SYNTAX_BODY(api_name)                                                                               \
     "USAGE:\n"                                                                                                         \
     "--------------------------------------------------------------------------------\n" api_name                      \
-    " <uuid> start <wss-url> <mono | mixed | stereo>\n"                                                                \
+    " <uuid> start <ws-uri> <mono | mixed | stereo>\n"                                                                 \
     "         [send_rate] [playback_rate] [mute_user]\n"                                                               \
     "         where <rate> = 8k|16k|24k or any multiple of 8000\n"                                                     \
     "         send_rate default: 24k, playback_rate default: 24k\n" api_name                                           \
@@ -426,14 +426,14 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_openai_audio_stream_load) {
     SWITCH_ADD_API(api_interface, "uuid_openai_audio_stream", "audio_stream API", stream_function, STREAM_API_SYNTAX);
     SWITCH_ADD_API(api_interface, "uuid_raw_audio_stream", "raw audio_stream API", raw_stream_function,
                    RAW_STREAM_API_SYNTAX);
-    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid start wss-url");
+    switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid start ws-uri");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid stop");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid pause");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid resume");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid mute");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid unmute");
     switch_console_set_complete("add uuid_openai_audio_stream ::console::list_uuid send_json");
-    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid start ws-url");
+    switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid start ws-uri");
     switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid stop");
     switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid pause");
     switch_console_set_complete("add uuid_raw_audio_stream ::console::list_uuid resume");

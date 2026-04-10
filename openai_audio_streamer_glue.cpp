@@ -997,10 +997,19 @@ switch_status_t stream_session_init(switch_core_session_t *session, responseHand
 
     if (switch_channel_var_true(channel, "STREAM_RAW_AUDIO")) {
         raw_audio_mode = true;
+        if (force_raw_audio_mode) {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING,
+                              "STREAM_RAW_AUDIO is deprecated and unnecessary when using uuid_raw_audio_stream. "
+                              "Remove the channel variable; raw audio mode is already enabled by the API.\n");
+        } else {
+            switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING,
+                              "STREAM_RAW_AUDIO is deprecated and will be removed in the next major release. "
+                              "Use uuid_raw_audio_stream <uuid> start ... to enable raw audio mode.\n");
+        }
     }
 
     if (raw_audio_mode) {
-        const char *raw_audio_source = force_raw_audio_mode ? "API" : "channel variable";
+        const char *raw_audio_source = force_raw_audio_mode ? "API" : "deprecated channel variable";
         switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_INFO,
                           "Raw audio mode enabled via %s, bypassing JSON+base64 encoding.\n", raw_audio_source);
     }

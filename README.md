@@ -22,7 +22,7 @@ But not only that: the module can also be used as a generic WebSocket audio brid
 * Use L16 format in your `session.update` to have the audio playback and temporal audio files creation to work properly. The module was tested with OpenAI's Realtime API set on L16 format. 
 * You do not have to worry about the incoming sampling rate, the module resamples the audio to match the channels frame codec. 
 * **Specify the OpenAI Realtime model in the URI**. For OpenAI Realtime PCM audio, the module now defaults the send rate to `24k`, so the basic command can be `uuid_openai_audio_stream ${uuid} start wss://api.openai.com/v1/realtime?model=gpt-realtime mono`. You can still override the send rate explicitly if needed.
-* For raw PCM custom backends, prefer `uuid_raw_audio_stream ${uuid} start ...`. The older `STREAM_RAW_AUDIO=true` + `uuid_openai_audio_stream ... start ...` flow is still supported for backward compatibility.
+* For raw PCM custom backends, prefer `uuid_raw_audio_stream ${uuid} start ...`. The older `STREAM_RAW_AUDIO=true` + `uuid_openai_audio_stream ... start ...` flow is deprecated, still supported for backward compatibility, and will be removed in the next major release.
 
 ## Installation
 
@@ -108,7 +108,7 @@ The following channel variables can be used to fine-tune websocket connection an
 | STREAM_TLS_DISABLE_HOSTNAME_VALIDATION | true or 1 disable hostname check in WSS connections     | false   |
 | STREAM_DISABLE_AUDIOFILES              | true or 1, disables debug audio files generation in tmp | false   |
 | STREAM_OPENAI_API_KEY                  | OpenAI API key, used for authentication with OpenAI's   | none    |
-| STREAM_RAW_AUDIO                       | true or 1, enables raw audio mode for legacy start flow | false   |
+| STREAM_RAW_AUDIO                       | true or 1, deprecated legacy raw-mode switch for `uuid_openai_audio_stream` | false   |
 
 - Per message deflate compression option is enabled by default. It can lead to a very nice bandwidth savings. To disable it set the channel var to `true|1`.
 - Heart beat, sent every xx seconds when there is no traffic to make sure that load balancers do not kill an idle connection.
@@ -140,7 +140,7 @@ With raw audio mode enabled, the module acts as a bidirectional PCM16 audio brid
 Raw audio mode can be enabled in two ways:
 
 - Preferred: start the stream with `uuid_raw_audio_stream`.
-- Backward compatible: set `STREAM_RAW_AUDIO=true` and start with `uuid_openai_audio_stream`.
+- Deprecated legacy path: set `STREAM_RAW_AUDIO=true` and start with `uuid_openai_audio_stream`. This remains supported for backward compatibility, emits a runtime warning, and will be removed in the next major release.
 
 In both cases the module bypasses JSON+base64 encoding and decoding only for audio payloads and uses raw PCM16 binary WebSocket frames instead.
 
@@ -173,7 +173,7 @@ All other JSON text events, such as `session.updated` or `response.done`, contin
 <action application="playback" data="silence_stream://-1//"/>
 ```
 
-If you still need the legacy path, this remains valid:
+If you still need the deprecated legacy path for compatibility, this remains valid for now:
 
 ```xml
 <action application="set" data="STREAM_RAW_AUDIO=true"/>
@@ -195,11 +195,11 @@ A compliant custom backend using raw audio mode must:
 The freeswitch module exposes the following API commands:
 
 ```
-uuid_openai_audio_stream <uuid> start <wss-url> <mix-type> [<send-rate>] [<playback-rate>] [mute_user]
+uuid_openai_audio_stream <uuid> start <ws-uri> <mix-type> [<send-rate>] [<playback-rate>] [mute_user]
 ```
 Attaches a media bug and starts streaming audio (in L16 format) to the websocket server. Default send rate is 24k, matching the OpenAI Realtime API requirement. If send-rate differs from the channel codec rate, audio will be resampled. Passing `mute_user` delays forwarding caller audio to the Realtime API until you explicitly unmute.
 - `uuid` - Freeswitch channel unique id
-- `wss-url` - websocket url `ws://` or `wss://`
+- `ws-uri` - websocket URL using either `ws://` or `wss://`
 - `mix-type` - choice of
   - "mono" - single channel containing caller's audio
   - "mixed" - single channel containing both caller and callee audio
@@ -220,11 +220,11 @@ Attaches a media bug and starts streaming audio (in L16 format) to the websocket
 - **RAW AUDIO MODE NOTE**: See the [Raw Audio Mode](#raw-audio-mode) section below for the expected backend contract, including required JSON control events such as `response.output_audio.done`.
 
 ```
-uuid_raw_audio_stream <uuid> start <wss-url> <mix-type> [<send-rate>] [<playback-rate>] [mute_user]
+uuid_raw_audio_stream <uuid> start <ws-uri> <mix-type> [<send-rate>] [<playback-rate>] [mute_user]
 ```
-Uses the same arguments as `uuid_openai_audio_stream ... start ...`, but forces raw PCM16 WebSocket audio framing without requiring `STREAM_RAW_AUDIO=true`. This is the preferred entry point for compliant custom raw-audio backends.
+Uses the same arguments as `uuid_openai_audio_stream ... start ...`, but forces raw PCM16 WebSocket audio framing without requiring the deprecated `STREAM_RAW_AUDIO=true` channel variable. This is the preferred entry point for compliant custom raw-audio backends.
 
-All lifecycle commands (`stop`, `pause`, `resume`, `mute`, `unmute`, and `send_json`) are available on both `uuid_openai_audio_stream` and `uuid_raw_audio_stream`. The only behavioral difference is how `start` selects raw audio mode.
+All lifecycle commands (`stop`, `pause`, `resume`, `mute`, `unmute`, and `send_json`) are available on both `uuid_openai_audio_stream` and `uuid_raw_audio_stream`, because `uuid_raw_audio_stream` only changes how `start` selects raw audio mode and does not create a separate control plane. For clarity and consistency, prefer controlling the stream through the same API family used for `start`.
 
 ```
 uuid_openai_audio_stream <uuid> send_json
@@ -329,7 +329,7 @@ There is an error with the connection. Multiple fields will be available on the 
 
 ### play
 The audio playback is handled by the module.
-OpenAI typically returns JSON objects containing base64 encoded audio to be played to the user. When `STREAM_RAW_AUDIO` is enabled with a compatible custom backend, playback audio can also arrive as binary PCM frames.
+OpenAI typically returns JSON objects containing base64 encoded audio to be played to the user. When raw audio mode is enabled with a compatible custom backend, playback audio can also arrive as binary PCM frames.
 The audio delta response may include other fields, but not so important for the audio playback.
 In raw audio mode, binary PCM frames only carry audio data. Control and lifecycle expectations are described in the [Raw Audio Mode](#raw-audio-mode) section.
 ```json
