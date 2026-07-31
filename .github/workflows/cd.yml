@@ -6,23 +6,59 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
-  contents: write
+  contents: read
+  packages: read
 
 env:
   REPO: ${{ github.repository }}
 
 jobs:
-  release_github:
-    runs-on: ubuntu-latest
+  validate_tag:
+    name: Validate release tag
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
+      - name: Checkout release history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
+      - name: Ensure tagged commit belongs to main
+        run: |
+          set -eu
+          tag_commit="$(git rev-list -n 1 "$GITHUB_REF")"
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error::Release tags must point to a commit in main history."
+            exit 1
+          fi
+
+  build:
+    name: Validate build
+    needs: validate_tag
+    uses: ./.github/workflows/build.yml
+
+  static_checks:
+    name: Validate static checks
+    needs: validate_tag
+    uses: ./.github/workflows/code-checks.yml
+
+  tests:
+    name: Validate tests
+    needs: validate_tag
+    uses: ./.github/workflows/tests.yml
+
+  release_github:
+    name: Create GitHub release
+    needs: [build, static_checks, tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ github.ref_name }}" \
             -R "$REPO" \
+            --verify-tag \
             --title "Release ${{ github.ref_name }}" \
             --generate-notes
