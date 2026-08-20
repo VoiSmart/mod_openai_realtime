@@ -13,6 +13,8 @@ from pathlib import Path
 
 MOCK_URL = "ws://127.0.0.1:18080"
 EVENT_LOG = Path("/tmp/mod-openai-mock-events.jsonl")
+PLAYBACK_DRAIN_MARGIN_SECONDS = 0.4
+PLAYBACK_DURATION_TOLERANCE_SECONDS = 0.1
 
 
 def api(command, timeout=10):
@@ -118,6 +120,11 @@ def audible_duration(samples, sample_rate):
     return active_samples / sample_rate
 
 
+def wait_for_realtime_playback(duration_seconds):
+    # The mock queues audio immediately, but FreeSWITCH consumes it at media rate.
+    time.sleep(duration_seconds + PLAYBACK_DRAIN_MARGIN_SECONDS)
+
+
 class ModuleIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.uuid = self.originate_call()
@@ -180,6 +187,20 @@ class ModuleIntegrationTest(unittest.TestCase):
             time.sleep(0.05)
         self.fail(f"stream context was not cleaned up after peer disconnect: {last_result}")
 
+    def assert_recording_contains_tone(self, expected_frequency, expected_duration_seconds):
+        self.assertTrue(
+            self.recording.exists(),
+            "FreeSWITCH did not create the playback recording",
+        )
+        sample_rate, samples = read_mono_pcm16(self.recording)
+        self.assertGreater(
+            audible_duration(samples, sample_rate),
+            expected_duration_seconds - PLAYBACK_DURATION_TOLERANCE_SECONDS,
+            "recording contains less audible audio than the mock sent",
+        )
+        frequency = dominant_frequency(samples, sample_rate)
+        self.assertAlmostEqual(frequency, expected_frequency, delta=75)
+
     def test_flow_control_and_final_stop_payload(self):
         self.start_stream()
         assert_ok(self, f"uuid_openai_audio_stream {self.uuid} pause")
@@ -209,15 +230,33 @@ class ModuleIntegrationTest(unittest.TestCase):
         assert_ok(self, f"uuid_openai_audio_stream {self.uuid} send_json {request}")
         sent = wait_for_event(lambda event: event.get("event") == "audio-response-sent", before)
         self.assertIsNotNone(sent, "mock playback tone was not delivered")
-        time.sleep(1)
+        wait_for_realtime_playback(sent["duration_seconds"])
         assert_ok(self, f"uuid_record {self.uuid} stop {self.recording}")
 
-        self.assertTrue(self.recording.exists(), "FreeSWITCH did not create the playback recording")
-        sample_rate, samples = read_mono_pcm16(self.recording)
-        self.assertGreater(audible_duration(samples, sample_rate), 0.5, "playback is missing audible audio")
+        self.assert_recording_contains_tone(sent["frequency"], sent["duration_seconds"])
+        self.stop_stream()
 
-        frequency = dominant_frequency(samples, sample_rate)
-        self.assertAlmostEqual(frequency, sent["frequency"], delta=75)
+    def test_reused_response_id_does_not_suppress_new_playback(self):
+        self.start_stream()
+        self.recording = Path(f"/tmp/mod-openai-response-id-{self.uuid}.wav")
+        self.recording.unlink(missing_ok=True)
+        assert_ok(self, f"uuid_record {self.uuid} start {self.recording}")
+
+        before = len(mock_events())
+        request = encode_json({"type": "integration.reused_response_id"})
+        assert_ok(self, f"uuid_openai_audio_stream {self.uuid} send_json {request}")
+        sent = wait_for_event(
+            lambda event: event.get("event") == "reused-response-id-audio-sent",
+            before,
+        )
+        self.assertIsNotNone(
+            sent,
+            "mock did not send audio with the reused response_id",
+        )
+        wait_for_realtime_playback(sent["duration_seconds"])
+        assert_ok(self, f"uuid_record {self.uuid} stop {self.recording}")
+
+        self.assert_recording_contains_tone(sent["frequency"], sent["duration_seconds"])
         self.stop_stream()
 
     def test_double_start_is_rejected(self):

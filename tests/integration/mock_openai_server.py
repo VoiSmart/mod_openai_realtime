@@ -10,6 +10,15 @@ from pathlib import Path
 import websockets
 
 
+def pcm16_tone(sample_rate, frequency, duration_seconds, amplitude=12000):
+    sample_count = int(sample_rate * duration_seconds)
+    samples = (
+        int(amplitude * math.sin(2 * math.pi * frequency * index / sample_rate))
+        for index in range(sample_count)
+    )
+    return struct.pack(f"<{sample_count}h", *samples)
+
+
 class MockRealtimeServer:
     def __init__(self, event_log: Path, ready_file: Path):
         self.event_log = event_log
@@ -66,20 +75,16 @@ class MockRealtimeServer:
                     await websocket.send(json.dumps({"type": "session.updated", "session": payload.get("session", {})}))
                 elif message_type == "response.create":
                     await self.send_audio_response(websocket)
+                elif message_type == "integration.reused_response_id":
+                    await self.send_reused_response_id_audio(websocket)
         finally:
             await self.record("disconnected", path=path)
 
     async def send_audio_response(self, websocket):
         sample_rate = 24000
         frequency = 1000
-        duration = 0.6
-        amplitude = 12000
-        sample_count = int(sample_rate * duration)
-        samples = (
-            int(amplitude * math.sin(2 * math.pi * frequency * index / sample_rate))
-            for index in range(sample_count)
-        )
-        audio = struct.pack(f"<{sample_count}h", *samples)
+        duration_seconds = 0.6
+        audio = pcm16_tone(sample_rate, frequency, duration_seconds)
         chunk_sizes = (137, 521, 1003, 269, 1607)
         response_id = "integration-response"
 
@@ -107,6 +112,47 @@ class MockRealtimeServer:
             "audio-response-sent",
             response_id=response_id,
             frequency=frequency,
+            duration_seconds=duration_seconds,
+        )
+
+    async def send_reused_response_id_audio(self, websocket):
+        sample_rate = 24000
+        response_id = "reused-response-id"
+
+        # Complete one response, interrupt playback, and reuse its ID for a later response.
+        # The peer-provided ID must not suppress otherwise valid playback audio.
+        prime_audio = pcm16_tone(sample_rate, frequency=700, duration_seconds=0.04)
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "response.output_audio.delta",
+                    "response_id": response_id,
+                    "delta": base64.b64encode(prime_audio).decode("ascii"),
+                }
+            )
+        )
+        await websocket.send(json.dumps({"type": "response.output_audio.done", "response_id": response_id}))
+        await websocket.send(json.dumps({"type": "input_audio_buffer.speech_started"}))
+        await websocket.send(json.dumps({"type": "input_audio_buffer.speech_stopped"}))
+
+        frequency = 1400
+        duration_seconds = 0.6
+        replacement_audio = pcm16_tone(sample_rate, frequency, duration_seconds)
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "response.output_audio.delta",
+                    "response_id": response_id,
+                    "delta": base64.b64encode(replacement_audio).decode("ascii"),
+                }
+            )
+        )
+        await websocket.send(json.dumps({"type": "response.output_audio.done", "response_id": response_id}))
+        await self.record(
+            "reused-response-id-audio-sent",
+            response_id=response_id,
+            frequency=frequency,
+            duration_seconds=duration_seconds,
         )
 
     async def run(self, host, port):

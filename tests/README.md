@@ -40,8 +40,10 @@ The integration image is built from the `integration` target in `Dockerfile.ci`.
 pinned FreeSWITCH runtime, its test configuration, and Python. The module and tests are not embedded in the image:
 they are built from the current checkout and executed every time the container starts.
 
-The mock server sends a known PCM16 tone which is recorded from the FreeSWITCH channel and checked for audible
-duration and dominant frequency, exercising the playback queue and resampling path end to end.
+The mock server sends known PCM16 tones which are recorded from the FreeSWITCH channel and checked for audible
+duration and dominant frequency, exercising the playback queue and resampling path end to end. A compatibility
+scenario also reuses `response_id` for a later response and verifies that the peer-provided ID does not suppress
+valid playback audio.
 
 ```sh
 ./tests/run-integration.sh

@@ -153,10 +153,7 @@ class AudioStreamer {
 
             } else if (msg->type == ix::WebSocketMessageType::Open) {
                 // A new connection starts a new PCM stream: forget any half-sample carried over
-                // and any barge-in response tracking from the previous connection
                 m_has_pending_raw_byte = false;
-                m_has_cancelled_response = false;
-                m_current_response_id.clear();
 
                 // On OOM the event is still fired, just without a JSON body
                 cJSON *root = cJSON_CreateObject();
@@ -498,11 +495,6 @@ class AudioStreamer {
                 clear_audio_queue();
                 // also clear the private_t playback buffer used in write frame
                 request_playback_clear();
-                // remember which response was interrupted so its late deltas can be dropped
-                if (!m_current_response_id.empty()) {
-                    m_cancelled_response_id = m_current_response_id;
-                    m_has_cancelled_response = true;
-                }
                 break;
 
             case stream_protocol::JsonMessageType::SpeechStopped:
@@ -511,22 +503,6 @@ class AudioStreamer {
                 break;
 
             case stream_protocol::JsonMessageType::AudioDelta: {
-                // Drop late deltas belonging to a response interrupted by barge-in: they would
-                // otherwise be queued and replayed over the new response. A delta from a different
-                // response clears the cancelled state and is played normally.
-                const char *response_id = cJSON_GetObjectCstr(json, "response_id");
-                if (response_id) {
-                    if (m_has_cancelled_response && m_cancelled_response_id == response_id) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG,
-                                          "(%s) processMessage - dropping delta from cancelled response %s\n",
-                                          m_sessionId.c_str(), response_id);
-                        cJSON_Delete(json);
-                        return SWITCH_TRUE; // handled: do not forward the stale base64 payload
-                    }
-                    m_has_cancelled_response = false;
-                    m_current_response_id = response_id;
-                }
-
                 const char *jsonAudio = cJSON_GetObjectCstr(json, "delta");
                 m_response_audio_done = false;
 
@@ -833,11 +809,6 @@ class AudioStreamer {
     private_t *m_context = nullptr;      // owner context; valid until the WebSocket thread has been joined
     uint8_t m_pending_raw_byte = 0;      // raw mode: trailing odd byte carried to the next binary frame
     bool m_has_pending_raw_byte = false; // WebSocket thread only
-    // Barge-in response tracking (WebSocket thread only): late deltas from a response cancelled by
-    // barge-in must not be replayed over the next response
-    std::string m_current_response_id;   // response_id of the last delta seen
-    std::string m_cancelled_response_id; // response interrupted by barge-in
-    bool m_has_cancelled_response = false;
 };
 
 namespace {
