@@ -1,9 +1,29 @@
 #!/bin/sh
 set -eu
 
-project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-build_dir=${BUILD_DIR:-"${project_dir}/build/tests"}
+project_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 parallel_jobs=${CMAKE_BUILD_PARALLEL_LEVEL:-}
+
+case "$#" in
+    0)
+        sanitizers=OFF
+        default_build_dir="${project_dir}/build/tests"
+        ;;
+    1)
+        if [ "$1" != "--sanitizers" ]; then
+            echo "usage: $0 [--sanitizers]" >&2
+            exit 2
+        fi
+        sanitizers=ON
+        default_build_dir="${project_dir}/build/tests-sanitized"
+        ;;
+    *)
+        echo "usage: $0 [--sanitizers]" >&2
+        exit 2
+        ;;
+esac
+
+build_dir=${BUILD_DIR:-${default_build_dir}}
 
 if [ -z "${parallel_jobs}" ]; then
     if command -v nproc >/dev/null 2>&1; then
@@ -22,16 +42,12 @@ case "${parallel_jobs}" in
         ;;
 esac
 
-sanitizer_args=
-if [ "${1:-}" = "--sanitizers" ]; then
-    sanitizer_args="-DENABLE_TEST_SANITIZERS=ON"
-elif [ "$#" -ne 0 ]; then
-    echo "usage: $0 [--sanitizers]" >&2
-    exit 2
-fi
-
 cmake -S "${project_dir}/tests" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Debug \
-    ${sanitizer_args}
+    -DBUILD_INTEGRATION_TESTS=OFF \
+    "-DENABLE_TEST_SANITIZERS=${sanitizers}"
 cmake --build "${build_dir}" --parallel "${parallel_jobs}"
-ctest --test-dir "${build_dir}" --output-on-failure
+(
+    cd "${build_dir}"
+    ctest --output-on-failure --no-tests=error
+)

@@ -3,6 +3,8 @@
 //  Version: 2.rc.09 (release candidate)
 //
 
+// Local modifications for mod_openai_realtime: formatted and extended with strict input validation.
+
 #ifndef BASE64_H_C0CE2A47_D10E_42C9_A27C_C883944E704A
 #define BASE64_H_C0CE2A47_D10E_42C9_A27C_C883944E704A
 
@@ -17,6 +19,7 @@ std::string base64_encode_pem(std::string const& s);
 std::string base64_encode_mime(std::string const& s);
 
 std::string base64_decode(std::string const& s, bool remove_linebreaks = false);
+std::string base64_decode_strict(std::string const& s);
 std::string base64_encode(unsigned char const *, size_t len, bool url = false);
 
 #if __cplusplus >= 201703L

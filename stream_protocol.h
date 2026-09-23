@@ -2,10 +2,11 @@
 #define STREAM_PROTOCOL_H
 
 #include <cstddef>
+#include <cstdint>
 
 namespace stream_protocol {
 
-enum class JsonMessageType {
+enum class JsonMessageType : std::uint8_t {
     Error,
     SpeechStarted,
     SpeechStopped,

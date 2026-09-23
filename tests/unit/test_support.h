@@ -3,13 +3,19 @@
 
 #include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 
-class TestFailure : public std::runtime_error {
+class TestFailure final : public std::exception {
   public:
     TestFailure(const char *expression, const char *file, int line)
-        : std::runtime_error(std::string(file) + ":" + std::to_string(line) + ": check failed: " + expression) {}
+        : m_message(std::string(file) + ":" + std::to_string(line) + ": check failed: " + expression) {}
+
+    const char *what() const noexcept override {
+        return m_message.c_str();
+    }
+
+  private:
+    std::string m_message;
 };
 
 #define CHECK(expression)                                                                                              \

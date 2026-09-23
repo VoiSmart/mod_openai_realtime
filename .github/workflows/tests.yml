@@ -41,4 +41,15 @@ jobs:
         run: docker pull "${INTEGRATION_BASE_IMAGE}"
 
       - name: Run unit and integration tests
+        env:
+          TEST_ARTIFACT_DIR: ${{ runner.temp }}/mod-openai-test-artifacts
         run: ./tests/run-integration.sh
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-test-diagnostics
+          path: ${{ runner.temp }}/mod-openai-test-artifacts
+          if-no-files-found: warn
+          retention-days: 7

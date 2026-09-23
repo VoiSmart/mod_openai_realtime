@@ -53,4 +53,13 @@ jobs:
       - name: Run unit and integration tests
         env:
           INTEGRATION_BASE_IMAGE: mod-openai-realtime-integration:ci
+          TEST_ARTIFACT_DIR: ${{ runner.temp }}/mod-openai-test-artifacts
         run: ./tests/run-integration.sh
+
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-image-checks-diagnostics
+          path: ${{ runner.temp }}/mod-openai-test-artifacts
+          retention-days: 7

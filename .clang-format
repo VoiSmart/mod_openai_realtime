@@ -9,4 +9,5 @@ AllowShortLoopsOnASingleLine: false
 IndentCaseLabels: true
 SpaceBeforeParens: ControlStatements
 BreakBeforeBraces: Attach
-SortIncludes: Never
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive

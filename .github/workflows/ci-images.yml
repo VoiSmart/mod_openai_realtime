@@ -101,7 +101,16 @@ jobs:
         env:
           INTEGRATION_BASE_IMAGE: ${{ steps.image.outputs.name }}@${{ steps.integration-build.outputs.digest }}
           TEST_IMAGE: mod-openai-realtime-tests:${{ github.sha }}
+          TEST_ARTIFACT_DIR: ${{ runner.temp }}/mod-openai-test-artifacts
         run: ./tests/run-integration.sh
+
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-images-diagnostics
+          path: ${{ runner.temp }}/mod-openai-test-artifacts
+          retention-days: 7
 
       - name: Promote verified aliases
         if: github.ref == 'refs/heads/main'

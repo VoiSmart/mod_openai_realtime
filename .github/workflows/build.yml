@@ -15,6 +15,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     container:
       # Published together with the integration digest from main@9b310c95.
       # Update this, code-checks.yml and tests.yml from the same CI Images run.

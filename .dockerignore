@@ -2,11 +2,10 @@
 .github
 .idea
 .mypy_cache
+.ruff_cache
+.venv
 .vscode
-__pycache__
-*.pyc
+**/__pycache__
+**/*.pyc
 build*/
 cmake-build-debug
-review-report.md
-CLAUDE.md
-test_tools

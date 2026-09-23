@@ -59,7 +59,7 @@ jobs:
   release_github:
     name: Create GitHub release
     needs: [build, static_checks, tests]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:

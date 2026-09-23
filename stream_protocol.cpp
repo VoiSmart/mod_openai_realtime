@@ -32,8 +32,7 @@ bool json_depth_exceeded(const char *json, int max_depth) {
         return true;
     }
 
-    // FreeSWITCH's bundled cJSON parser is recursive. Reject excessive nesting before parsing so
-    // an untrusted peer cannot exhaust the WebSocket thread's stack.
+    // Bound nesting before FreeSWITCH's recursive cJSON parser uses the calling thread's stack.
     int depth = 0;
     bool in_string = false;
     for (; *json; ++json) {
@@ -60,7 +59,7 @@ bool json_depth_exceeded(const char *json, int max_depth) {
 }
 
 bool validate_ws_uri(const char *url, char *destination, std::size_t destination_size) {
-    if (!url || !destination || destination_size == 0) {
+    if (!url || !destination || destination_size == 0 || std::strpbrk(url, "\r\n")) {
         return false;
     }
 
@@ -128,10 +127,19 @@ bool validate_ws_uri(const char *url, char *destination, std::size_t destination
     }
 
     const std::size_t length = std::strlen(url);
-    if (length >= destination_size) {
+    const std::size_t extra_slash = *host_end == '?' ? 1 : 0;
+    if (length >= destination_size - extra_slash) {
         return false;
     }
-    std::memcpy(destination, url, length + 1);
+    if (extra_slash) {
+        // The pinned IXWebSocket parser needs a path before the query.
+        const std::size_t authority_length = static_cast<std::size_t>(host_end - url);
+        std::memcpy(destination, url, authority_length);
+        destination[authority_length] = '/';
+        std::memcpy(destination + authority_length + 1, host_end, length - authority_length + 1);
+    } else {
+        std::memcpy(destination, url, length + 1);
+    }
     return true;
 }
 
